@@ -31,6 +31,12 @@
             gap: 3rem;
             margin-bottom: 1.5rem;
         }
+        .btn-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+        }
         .btn {
             font-size: 2rem;
             font-weight: bold;
@@ -47,6 +53,12 @@
         }
         .btn-discard { background-color: #e74c3c; }
         .btn-keep { background-color: #3498db; }
+
+        .btn-hint {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+            font-weight: bold;
+        }
 
         #btnUndo {
             font-size: 1.2rem;
@@ -101,10 +113,16 @@
                 gap: 1.5rem; 
                 margin-bottom: 2rem;
             }
+            .btn-wrapper {
+                gap: 0.3rem;
+            }
             .btn {
                 font-size: 1.3rem; 
                 padding: 0.8rem 1.8rem; 
                 border-radius: 8px;
+            }
+            .btn-hint {
+                display: none; 
             }
             #btnUndo {
                 font-size: 1rem;
@@ -121,11 +139,20 @@
     <div id="wordDisplay">辞書を読み込み中...</div>
 
     <div class="btn-container">
-        <button class="btn btn-discard" id="btnDiscard">← 消す</button>
-        <button class="btn btn-keep" id="btnKeep">残す →</button>
+        <div class="btn-wrapper">
+            <button class="btn btn-discard" id="btnDiscard">← 消す</button>
+            <span class="btn-hint">「←」 キー</span>
+        </div>
+        <div class="btn-wrapper">
+            <button class="btn btn-keep" id="btnKeep">残す →</button>
+            <span class="btn-hint">「→」 キー</span>
+        </div>
     </div>
 
-    <button id="btnUndo" disabled>↩ 1つ前に戻る</button>
+    <div class="btn-wrapper" style="margin-bottom: 4rem;">
+        <button id="btnUndo" disabled>↩ 1つ前に戻る</button>
+        <span class="btn-hint">Z キー</span>
+    </div>
 
     <button id="downloadBtn">結果をダウンロード (CSV)</button>
 
@@ -277,6 +304,7 @@
         document.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowLeft') judge(false);
             else if (e.key === 'ArrowRight') judge(true);
+            else if (e.key.toLowerCase() === 'z') undo();
         });
 
         downloadBtn.addEventListener('click', async () => {
