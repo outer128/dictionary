@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リアルタイム単語選別ツール</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Meiryo, system-ui, -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f2f5;
+            color: #333;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #wordDisplay {
+            font-size: 4rem;
+            font-weight: bold;
+            margin: 2rem 0;
+            text-align: center;
+            min-height: 6rem;
+            display: flex;
+            align-items: center;
+        }
+        .btn-container {
+            display: flex;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        .btn {
+            font-size: 1.5rem;
+            font-weight: bold;
+            padding: 1rem 3rem;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            color: white;
+            transition: transform 0.1s, background-color 0.2s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .btn:active, .btn.active {
+            transform: scale(0.95);
+        }
+        .btn-discard { background-color: #e74c3c; }
+        .btn-discard:hover { background-color: #c0392b; }
+        .btn-keep { background-color: #3498db; }
+        .btn-keep:hover { background-color: #2980b9; }
+        
+        #downloadBtn {
+            font-size: 1.2rem;
+            padding: 0.8rem 2rem;
+            background-color: #2ecc71;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+        #downloadBtn:hover { background-color: #27ae60; }
+        
+        .progress {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 1.2rem;
+            background: #fff;
+            padding: 10px 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <label for="fileInput" style="font-weight: bold;">辞書ファイル (Shift-JIS) を選択:</label>
+        <input type="file" id="fileInput" accept=".dic,.txt">
+        <p style="font-size:0.8rem; color:#666; margin:5px 0 0 0;">※既にデータベースにある単語のカウントは維持されます</p>
+    </div>
+
+    <div class="progress" id="progressDisplay">残り: 0 語</div>
+
+    <div id="wordDisplay">ファイルをアップロードしてください</div>
+
+    <div class="btn-container">
+        <button class="btn btn-discard" id="btnDiscard">← 消す</button>
+        <button class="btn btn-keep" id="btnKeep">残す →</button>
+    </div>
+
+    <button id="downloadBtn" id="btnDownload">結果をダウンロード (CSV)</button>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, doc, setDoc, updateDoc, increment, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyA8aPQCAxMVLOpIKuy5ZqI1-Nm5dbQHm5c",
+            authDomain: "dictionary-940fd.firebaseapp.com",
+            projectId: "dictionary-940fd",
+            storageBucket: "dictionary-940fd.firebasestorage.app",
+            messagingSenderId: "301602554861",
+            appId: "1:301602554861:web:cc96a746e4774c55c69de4"
+        };
+
+        // Firebaseの初期化
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let unjudgedWords = [];
+        let currentWord = null;
+
+        const wordDisplay = document.getElementById('wordDisplay');
+        const progressDisplay = document.getElementById('progressDisplay');
+        const btnDiscard = document.getElementById('btnDiscard');
+        const btnKeep = document.getElementById('btnKeep');
+
+        // ローカルストレージから「自分が今どこまで進んだか（未判定の単語リスト）」を復元
+        function loadLocalProgress() {
+            const savedUnjudged = localStorage.getItem('fb_unjudgedWords');
+            if (savedUnjudged) {
+                unjudgedWords = JSON.parse(savedUnjudged);
+                if (unjudgedWords.length > 0) {
+                    showNextWord();
+                } else {
+                    wordDisplay.innerText = "すべての単語を判定しました";
+                    updateProgress();
+                }
+            }
+        }
+
+        // ファイル読み込み時の初期化処理
+        function initData(text) {
+            // Shift-JISのテキストを改行で分割して空行を除外
+            const lines = text.split(/\r\n|\n/).map(line => line.trim()).filter(line => line !== '');
+            
+            // アップロードされた単語リストをそのまま「未判定リスト」にする
+            unjudgedWords = [...lines];
+            
+            // ランダムに出題するために配列をシャッフル
+            for (let i = unjudgedWords.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [unjudgedWords[i], unjudgedWords[j]] = [unjudgedWords[j], unjudgedWords[i]];
+            }
+
+            localStorage.setItem('fb_unjudgedWords', JSON.stringify(unjudgedWords));
+            showNextWord();
+        }
+
+        function updateProgress() {
+            progressDisplay.innerText = `残り: ${unjudgedWords.length} 語`;
+        }
+
+        // 次の単語を画面に表示
+        function showNextWord() {
+            updateProgress();
+            if (unjudgedWords.length === 0) {
+                wordDisplay.innerText = "全ての単語の判定が完了しました！";
+                currentWord = null;
+                return;
+            }
+            currentWord = unjudgedWords.pop();
+            wordDisplay.innerText = currentWord;
+            localStorage.setItem('fb_unjudgedWords', JSON.stringify(unjudgedWords));
+        }
+
+        // 判定処理（Firebaseへの保存）
+        async function judge(isKeep) {
+            if (!currentWord) return;
+            
+            // 視覚フィードバック
+            if (isKeep) visualFeedback(btnKeep);
+            else visualFeedback(btnDiscard);
+
+            const wordRef = doc(db, "word_stats", currentWord);
+            
+            try {
+                // クラッシュや競合を防ぐため、データがあるか一度確認
+                const docSnap = await getDoc(wordRef);
+                
+                if (!docSnap.exists()) {
+                    // データベースにまだない単語なら新しく作成
+                    await setDoc(wordRef, {
+                        keep: isKeep ? 1 : 0,
+                        discard: isKeep ? 0 : 1
+                    });
+                } else {
+                    // すでに誰かが登録した単語なら、安全にカウントを+1加算 (increment)
+                    await updateDoc(wordRef, {
+                        keep: isKeep ? increment(1) : increment(0),
+                        discard: isKeep ? increment(0) : increment(1)
+                    });
+                }
+            } catch (error) {
+                console.error("Firebaseへの保存に失敗しました:", error);
+                alert("通信エラーが発生しました。もう一度やり直してください。");
+                return; // エラー時は次の単語に進まない
+            }
+
+            // 成功したら次の単語へ
+            showNextWord();
+        }
+
+        function visualFeedback(button) {
+            button.classList.add('active');
+            setTimeout(() => button.classList.remove('active'), 100);
+        }
+
+        // 【イベント】ファイル選択（Shift-JIS）
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => initData(event.target.result);
+            reader.readAsText(file, 'Shift_JIS');
+        });
+
+        // 【イベント】クリック操作
+        btnDiscard.addEventListener('click', () => judge(false));
+        btnKeep.addEventListener('click', () => judge(true));
+
+        // 【イベント】キーボード操作（← と →）
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') judge(false);
+            else if (e.key === 'ArrowRight') judge(true);
+        });
+
+        // 【イベント】Firebaseから最新データを一括取得してCSVダウンロード
+        async function downloadCSV() {
+            wordDisplay.innerText = "データを取得中...";
+            try {
+                const querySnapshot = await getDocs(collection(db, "word_stats"));
+                let csvContent = "単語,捨てる回数,残す回数\n";
+                let hasData = false;
+
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    csvContent += `${doc.id},${data.discard || 0},${data.keep || 0}\n`;
+                    hasData = true;
+                });
+
+                if (!hasData) {
+                    alert("データベースにまだ判定データがありません。");
+                    showNextWord();
+                    return;
+                }
+
+                // Excel文字化け防止のBOM付きUTF-8
+                const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", "firebase_word_result.csv");
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+            } catch (error) {
+                console.error("データ取得エラー:", error);
+                alert("データのダウンロードに失敗しました。");
+            }
+            showNextWord();
+        }
+
+        // ダウンロードボタンにイベントを設定
+        document.getElementById('downloadBtn').addEventListener('click', downloadCSV);
+
+        // 起動時にローカルの進捗を復元
+        loadLocalProgress();
+    </script>
+</body>
+</html>
