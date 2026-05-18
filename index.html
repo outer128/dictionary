@@ -29,7 +29,7 @@
         .btn-container {
             display: flex;
             gap: 3rem;
-            margin-bottom: 4rem;
+            margin-bottom: 1.5rem;
         }
         .btn {
             font-size: 2rem;
@@ -47,6 +47,24 @@
         }
         .btn-discard { background-color: #e74c3c; }
         .btn-keep { background-color: #3498db; }
+
+        #btnUndo {
+            font-size: 1.2rem;
+            font-weight: bold;
+            padding: 0.6rem 2rem;
+            background-color: #7f8c8d;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 4rem; 
+            transition: opacity 0.2s;
+        }
+        #btnUndo:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
         
         #downloadBtn {
             position: absolute;
@@ -88,6 +106,11 @@
                 padding: 0.8rem 1.8rem; 
                 border-radius: 8px;
             }
+            #btnUndo {
+                font-size: 1rem;
+                padding: 0.5rem 1.5rem;
+                margin-bottom: 2rem;
+            }
         }
     </style>
 </head>
@@ -101,6 +124,8 @@
         <button class="btn btn-discard" id="btnDiscard">← 消す</button>
         <button class="btn btn-keep" id="btnKeep">残す →</button>
     </div>
+
+    <button id="btnUndo" disabled>↩ 1つ前に戻る</button>
 
     <button id="downloadBtn">結果をダウンロード (CSV)</button>
 
@@ -124,9 +149,10 @@
         const DICTIONARY_FILE_NAME = 'kobuta100.txt';
 
         let unjudgedWords = [];
-        // ブラウザに保存された「すでに自分が判定した単語」のリストを読み込む
         let judgedWords = new Set(JSON.parse(localStorage.getItem('myJudgedWords') || '[]'));
         let currentWord = null;
+
+        let lastHistory = null;
 
         const wordDisplay = document.getElementById('wordDisplay');
         const progressDisplay = document.getElementById('progressDisplay');
@@ -134,7 +160,6 @@
         const btnKeep = document.getElementById('btnKeep');
         const downloadBtn = document.getElementById('downloadBtn');
 
-        // 辞書ファイルを読み込んで初期化
         async function init() {
             try {
                 const response = await fetch('./' + DICTIONARY_FILE_NAME);
@@ -146,7 +171,6 @@
                 
                 const allWords = text.split(/\r\n|\n/).map(line => line.trim()).filter(line => line !== '');
                 
-                // まだ自分が判定していない単語だけを抽出
                 unjudgedWords = allWords.filter(word => !judgedWords.has(word));
                 
                 // シャッフル
@@ -180,19 +204,19 @@
         async function judge(isKeep) {
             if (!currentWord) return;
 
-            const targetWord = currentWord; // 裏で送信している間に次の単語へ切り替わるため、現在の単語を退避
+            const targetWord = currentWord; 
             
-            // UI上のボタンクリックアニメーション
             const btn = isKeep ? btnKeep : btnDiscard;
             btn.classList.add('active');
             setTimeout(() => btn.classList.remove('active'), 100);
 
-            // 1. ローカルの「判定済みリスト」に追加して、待たずにすぐ次の単語を表示
+            lastHistory = { word: targetWord, isKeep: isKeep };
+            btnUndo.disabled = false;
+
             judgedWords.add(targetWord);
             localStorage.setItem('myJudgedWords', JSON.stringify(Array.from(judgedWords)));
             showNextWord();
 
-            // 2. 裏側でFirebaseにカウントを加算
             const wordRef = doc(db, "word_stats", targetWord);
             try {
                 const docSnap = await getDoc(wordRef);
@@ -212,17 +236,49 @@
             }
         }
 
-        // ボタンクリックイベント
+        // ↩ 1つ前に戻る処理
+        async function undo() {
+            if (!lastHistory) return;
+
+            const rollbackWord = lastHistory.word;
+            const wasKeep = lastHistory.isKeep;
+
+            if (currentWord) {
+                unjudgedWords.push(currentWord);
+            }
+
+            currentWord = rollbackWord;
+            wordDisplay.innerText = currentWord;
+            wordDisplay.style.fontSize = "5rem"; 
+            if (window.innerWidth <= 768) wordDisplay.style.fontSize = "3rem";
+
+            judgedWords.delete(rollbackWord);
+            localStorage.setItem('myJudgedWords', JSON.stringify(Array.from(judgedWords)));
+
+            lastHistory = null;
+            btnUndo.disabled = true;
+            progressDisplay.innerText = `残り: ${unjudgedWords.length} 語`;
+
+            const wordRef = doc(db, "word_stats", rollbackWord);
+            try {
+                await updateDoc(wordRef, {
+                    discard: wasKeep ? increment(0) : increment(-1),
+                    keep: wasKeep ? increment(-1) : increment(0)
+                });
+            } catch (error) {
+                console.error("Firebaseの減算エラー:", error);
+            }
+        }
+
         btnDiscard.addEventListener('click', () => judge(false));
         btnKeep.addEventListener('click', () => judge(true));
+        btnUndo.addEventListener('click', undo);
 
-        // キーボードイベント（← と →）
         document.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowLeft') judge(false);
             else if (e.key === 'ArrowRight') judge(true);
         });
 
-        // ダウンロード処理
         downloadBtn.addEventListener('click', async () => {
             const originalText = downloadBtn.innerText;
             downloadBtn.innerText = "データを取得中...";
@@ -230,7 +286,6 @@
 
             try {
                 const querySnapshot = await getDocs(collection(db, "word_stats"));
-                // 1列目:単語、2列目:捨てる回数、3列目:残す回数
                 let csvContent = "単語,捨てる回数,残す回数\n";
                 
                 querySnapshot.forEach((doc) => {
@@ -243,7 +298,6 @@
                     return;
                 }
 
-                // Excel文字化け防止のBOM付き出力
                 const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement("a");
                 link.href = URL.createObjectURL(blob);
@@ -259,7 +313,6 @@
             }
         });
 
-        // ページ読み込み時に実行
         init();
     </script>
 </body>
