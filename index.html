@@ -72,6 +72,23 @@
             font-weight: bold;
             color: #666;
         }
+
+        @media (max-width: 768px) {
+            #wordDisplay {
+                font-size: 3rem; /* 単語の文字サイズを小さく (5rem -> 3rem) */
+                margin-bottom: 2rem;
+                min-height: 5rem;
+            }
+            .btn-container {
+                gap: 1.5rem; /* ボタン同士の間隔を少し狭く */
+                margin-bottom: 2rem;
+            }
+            .btn {
+                font-size: 1.3rem; /* ボタンの文字を小さく (2rem -> 1.3rem) */
+                padding: 0.8rem 1.8rem; /* ボタン自体のサイズも一回り小さく */
+                border-radius: 8px;
+            }
+        }
     </style>
 </head>
 <body>
