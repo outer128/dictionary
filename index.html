@@ -134,7 +134,9 @@
 
         @media (max-width: 768px) {
             #wordDisplay {
-                font-size: 3rem; 
+                font-size: min(3rem, 10vw); 
+                word-break: keep-all;
+                white-space: nowrap;
                 margin-bottom: 2rem;
                 min-height: 5rem;
             }
