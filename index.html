@@ -41,6 +41,10 @@
             transition: opacity 0.2s;
         }
 
+        #wordDisplay.clickable {
+            cursor: pointer;
+        }
+
         .btn-container {
             display: flex;
             gap: 3rem;
@@ -299,10 +303,8 @@
                         keep: isKeep ? 1 : 0
                     });
                 } else {
-                    await updateDoc(wordRef, {
-                        discard: isKeep ? increment(0) : increment(1),
-                        keep: isKeep ? increment(1) : increment(0)
-                    });
+                    const updateData = isKeep ? { keep: increment(1) } : { discard: increment(1) };
+                    await updateDoc(wordRef, updateData);
                 }
             } catch (error) {
                 console.error("Firebaseへの保存エラー:", error);
@@ -336,10 +338,8 @@
 
             const wordRef = doc(db, "word_stats", rollbackWord);
             try {
-                await updateDoc(wordRef, {
-                    discard: wasKeep ? increment(0) : increment(-1),
-                    keep: wasKeep ? increment(-1) : increment(0)
-                });
+                const updateData = wasKeep ? { keep: increment(-1) } : { discard: increment(-1) };
+                await updateDoc(wordRef, updateData);
             } catch (error) {
                 console.error("Firebaseの減算エラー:", error);
             }
@@ -372,31 +372,44 @@
             saveImgBtn.disabled = true;
 
             html2canvas(target, { backgroundColor: '#f7f9fc' }).then(async canvas => {
-                canvas.toBlob(async (blob) => {
-                    if (!blob) throw new Error("Blobの作成に失敗しました");
+                const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-                    const file = new File([blob], fileName, { type: "image/png" });
-                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                        try {
-                            await navigator.share({
-                                files: [file],
-                                title: '単語選別スクリーンショット',
-                                text: currentWord ? `「${currentWord}」の選別` : ''
-                            });
-                        } catch (err) {
-                            console.log("共有がキャンセルされました", err);
+                if (isMobile) {
+                    canvas.toBlob(async (blob) => {
+                        if (!blob) throw new Error("Blobの作成に失敗しました");
+                        const file = new File([blob], fileName, { type: "image/png" });
+                        
+                        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                            try {
+                                await navigator.share({
+                                    files: [file],
+                                    title: '単語選別スクリーンショット',
+                                    text: currentWord ? `「${currentWord}」の選別画面` : ''
+                                });
+                            } catch (err) {
+                                console.log("共有がキャンセルされました", err);
+                            }
+                        } else {
+                            downloadCanvas(canvas, fileName);
                         }
-                    } else {
-                        const link = document.createElement("a");
-                        link.href = canvas.toDataURL("image/png");
-                        link.download = fileName;
-                        link.click();
-                    }
-                    
-                    // ボタンの状態を元に戻す
+                        resetBtn();
+                    }, "image/png");
+                } else {
+                    downloadCanvas(canvas, fileName);
+                    resetBtn();
+                }
+
+                function downloadCanvas(cvs, name) {
+                    const link = document.createElement("a");
+                    link.href = cvs.toDataURL("image/png");
+                    link.download = name;
+                    link.click();
+                }
+
+                function resetBtn() {
                     saveImgBtn.innerText = originalText;
                     saveImgBtn.disabled = false;
-                }, "image/png");
+                }
 
             }).catch(err => {
                 console.error("スクリーンショットの作成に失敗しました:", err);
