@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>謎解き単語選別ツール</title>
+    <!-- スクリーンショット機能のためのライブラリを読み込み -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Meiryo, system-ui, -apple-system, sans-serif;
@@ -16,6 +18,18 @@
             background-color: #f7f9fc;
             color: #333;
         }
+
+        /* スクリーンショットで切り取る中央のエリア */
+        #screenshotTarget {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            background-color: #f7f9fc; /* スクショの背景色を固定 */
+            border-radius: 20px;
+        }
+
         #wordDisplay {
             font-size: 5rem;
             font-weight: bold;
@@ -25,7 +39,18 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            user-select: none;
+            transition: opacity 0.2s;
         }
+        /* 単語が選別可能な状態（クラスがついている時）のホバーエフェクト */
+        #wordDisplay.clickable {
+            cursor: pointer;
+        }
+        #wordDisplay.clickable:hover {
+            opacity: 0.6;
+            text-decoration: underline;
+        }
+
         .btn-container {
             display: flex;
             gap: 3rem;
@@ -78,21 +103,32 @@
             cursor: not-allowed;
         }
         
-        #downloadBtn {
+        /* 下部のボタンエリアを横並びにするコンテナ */
+        .bottom-actions {
             position: absolute;
             bottom: 2rem;
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .action-btn {
             font-size: 1rem;
             font-weight: bold;
             padding: 0.8rem 2rem;
-            background-color: #2ecc71;
-            color: white;
             border: none;
             border-radius: 6px;
             cursor: pointer;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            color: white;
+            transition: background-color 0.2s;
         }
+        #downloadBtn { background-color: #2ecc71; }
         #downloadBtn:hover { background-color: #27ae60; }
         #downloadBtn:disabled { background-color: #95a5a6; cursor: not-allowed; }
+
+        #saveImgBtn { background-color: #9b59b6; }
+        #saveImgBtn:hover { background-color: #8e44ad; }
+        #saveImgBtn:disabled { background-color: #95a5a6; cursor: not-allowed; }
 
         .progress {
             position: absolute;
@@ -129,6 +165,17 @@
                 padding: 0.5rem 1.5rem;
                 margin-bottom: 0;
             }
+            .bottom-actions {
+                gap: 0.8rem;
+                width: 90%;
+                justify-content: center;
+            }
+            .action-btn {
+                font-size: 0.9rem;
+                padding: 0.8rem 1rem;
+                flex: 1;
+                text-align: center;
+            }
         }
     </style>
 </head>
@@ -136,25 +183,32 @@
 
     <div class="progress" id="progressDisplay">読み込み中...</div>
 
-    <div id="wordDisplay">辞書を読み込み中...</div>
+    <!-- スクリーンショットで切り取る中央エリアの起点 -->
+    <div id="screenshotTarget">
+        <div id="wordDisplay">辞書を読み込み中...</div>
 
-    <div class="btn-container">
-        <div class="btn-wrapper">
-            <button class="btn btn-discard" id="btnDiscard">← 消す</button>
-            <span class="btn-hint">「←」 キー</span>
+        <div class="btn-container">
+            <div class="btn-wrapper">
+                <button class="btn btn-discard" id="btnDiscard">← 消す</button>
+                <span class="btn-hint">「←」 キー</span>
+            </div>
+            <div class="btn-wrapper">
+                <button class="btn btn-keep" id="btnKeep">残す →</button>
+                <span class="btn-hint">「→」 キー</span>
+            </div>
         </div>
-        <div class="btn-wrapper">
-            <button class="btn btn-keep" id="btnKeep">残す →</button>
-            <span class="btn-hint">「→」 キー</span>
+
+        <div class="btn-wrapper" style="margin-bottom: 1rem;">
+            <button id="btnUndo" disabled>↩ 1つ前に戻る</button>
+            <span class="btn-hint">Z キー</span>
         </div>
     </div>
 
-    <div class="btn-wrapper" style="margin-bottom: 4rem;">
-        <button id="btnUndo" disabled>↩ 1つ前に戻る</button>
-        <span class="btn-hint">Z キー</span>
+    <!-- 下部ボタンのコンテナ -->
+    <div class="bottom-actions">
+        <button id="downloadBtn" class="action-btn">結果をダウンロード (CSV)</button>
+        <button id="saveImgBtn" class="action-btn">単語を保存 (画像)</button>
     </div>
-
-    <button id="downloadBtn">結果をダウンロード (CSV)</button>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -186,6 +240,7 @@
         const btnDiscard = document.getElementById('btnDiscard');
         const btnKeep = document.getElementById('btnKeep');
         const downloadBtn = document.getElementById('downloadBtn');
+        const saveImgBtn = document.getElementById('saveImgBtn');
 
         async function init() {
             try {
@@ -210,6 +265,7 @@
             } catch (error) {
                 console.error(error);
                 wordDisplay.innerText = "エラー\n辞書ファイルが見つかりません";
+                wordDisplay.classList.remove('clickable');
                 wordDisplay.style.fontSize = "2rem";
             }
         }
@@ -219,12 +275,16 @@
             progressDisplay.innerText = `残り: ${unjudgedWords.length} 語`;
             if (unjudgedWords.length === 0) {
                 wordDisplay.innerText = "すべての単語の選別が完了しました！";
+                wordDisplay.classList.remove('clickable');
                 wordDisplay.style.fontSize = "2.5rem";
                 currentWord = null;
+                saveImgBtn.disabled = true;
                 return;
             }
             currentWord = unjudgedWords.pop();
             wordDisplay.innerText = currentWord;
+            wordDisplay.classList.add('clickable'); // クリック可能スタイルを適用
+            saveImgBtn.disabled = false;
         }
 
         // 判定処理（Firebaseへの保存）
@@ -276,6 +336,7 @@
 
             currentWord = rollbackWord;
             wordDisplay.innerText = currentWord;
+            wordDisplay.classList.add('clickable');
             wordDisplay.style.fontSize = "5rem"; 
             if (window.innerWidth <= 768) wordDisplay.style.fontSize = "3rem";
 
@@ -284,6 +345,7 @@
 
             lastHistory = null;
             btnUndo.disabled = true;
+            saveImgBtn.disabled = false;
             progressDisplay.innerText = `残り: ${unjudgedWords.length} 語`;
 
             const wordRef = doc(db, "word_stats", rollbackWord);
@@ -305,6 +367,31 @@
             if (e.key === 'ArrowLeft') judge(false);
             else if (e.key === 'ArrowRight') judge(true);
             else if (e.key.toLowerCase() === 'z') undo();
+        });
+
+        // 単語をクリックしたときに別タブでGoogle検索する処理
+        wordDisplay.addEventListener('click', () => {
+            if (currentWord) {
+                const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(currentWord)}`;
+                window.open(searchUrl, '_blank');
+            }
+        });
+
+        // 「単語を保存 (画像)」ボタンの処理
+        saveImgBtn.addEventListener('click', () => {
+            const target = document.getElementById('screenshotTarget');
+            const fileName = currentWord ? `word_${currentWord}.png` : 'word_selection.png';
+            
+            // html2canvasで中央エリアを画像化してダウンロード
+            html2canvas(target, { backgroundColor: '#f7f9fc' }).then(canvas => {
+                const link = document.createElement("a");
+                link.href = canvas.toDataURL("image/png");
+                link.download = fileName;
+                link.click();
+            }).catch(err => {
+                console.error("スクリーンショットの作成に失敗しました:", err);
+                alert("画像の保存に失敗しました。");
+            });
         });
 
         downloadBtn.addEventListener('click', async () => {
