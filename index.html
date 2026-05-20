@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>謎解き単語選別ツール</title>
-    <!-- スクリーンショット機能のためのライブラリを読み込み -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         body {
@@ -19,14 +18,13 @@
             color: #333;
         }
 
-        /* スクリーンショットで切り取る中央のエリア */
         #screenshotTarget {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             padding: 2rem;
-            background-color: #f7f9fc; /* スクショの背景色を固定 */
+            background-color: #f7f9fc; 
             border-radius: 20px;
         }
 
@@ -41,14 +39,6 @@
             justify-content: center;
             user-select: none;
             transition: opacity 0.2s;
-        }
-        /* 単語が選別可能な状態（クラスがついている時）のホバーエフェクト */
-        #wordDisplay.clickable {
-            cursor: pointer;
-        }
-        #wordDisplay.clickable:hover {
-            opacity: 0.6;
-            text-decoration: underline;
         }
 
         .btn-container {
@@ -103,7 +93,6 @@
             cursor: not-allowed;
         }
         
-        /* 下部のボタンエリアを横並びにするコンテナ */
         .bottom-actions {
             position: absolute;
             bottom: 2rem;
@@ -183,7 +172,6 @@
 
     <div class="progress" id="progressDisplay">読み込み中...</div>
 
-    <!-- スクリーンショットで切り取る中央エリアの起点 -->
     <div id="screenshotTarget">
         <div id="wordDisplay">辞書を読み込み中...</div>
 
@@ -204,7 +192,6 @@
         </div>
     </div>
 
-    <!-- 下部ボタンのコンテナ -->
     <div class="bottom-actions">
         <button id="downloadBtn" class="action-btn">結果をダウンロード (CSV)</button>
         <button id="saveImgBtn" class="action-btn">単語を保存 (画像)</button>
@@ -214,7 +201,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, setDoc, updateDoc, increment, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // いただいたFirebase設定
         const firebaseConfig = {
             apiKey: "AIzaSyA8aPQCAxMVLOpIKuy5ZqI1-Nm5dbQHm5c",
             authDomain: "dictionary-940fd.firebaseapp.com",
@@ -377,20 +363,46 @@
             }
         });
 
-        // 「単語を保存 (画像)」ボタンの処理
         saveImgBtn.addEventListener('click', () => {
             const target = document.getElementById('screenshotTarget');
             const fileName = currentWord ? `word_${currentWord}.png` : 'word_selection.png';
             
-            // html2canvasで中央エリアを画像化してダウンロード
-            html2canvas(target, { backgroundColor: '#f7f9fc' }).then(canvas => {
-                const link = document.createElement("a");
-                link.href = canvas.toDataURL("image/png");
-                link.download = fileName;
-                link.click();
+            const originalText = saveImgBtn.innerText;
+            saveImgBtn.innerText = "画像を作成中...";
+            saveImgBtn.disabled = true;
+
+            html2canvas(target, { backgroundColor: '#f7f9fc' }).then(async canvas => {
+                canvas.toBlob(async (blob) => {
+                    if (!blob) throw new Error("Blobの作成に失敗しました");
+
+                    const file = new File([blob], fileName, { type: "image/png" });
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                        try {
+                            await navigator.share({
+                                files: [file],
+                                title: '単語選別スクリーンショット',
+                                text: currentWord ? `「${currentWord}」の選別` : ''
+                            });
+                        } catch (err) {
+                            console.log("共有がキャンセルされました", err);
+                        }
+                    } else {
+                        const link = document.createElement("a");
+                        link.href = canvas.toDataURL("image/png");
+                        link.download = fileName;
+                        link.click();
+                    }
+                    
+                    // ボタンの状態を元に戻す
+                    saveImgBtn.innerText = originalText;
+                    saveImgBtn.disabled = false;
+                }, "image/png");
+
             }).catch(err => {
                 console.error("スクリーンショットの作成に失敗しました:", err);
                 alert("画像の保存に失敗しました。");
+                saveImgBtn.innerText = originalText;
+                saveImgBtn.disabled = false;
             });
         });
 
